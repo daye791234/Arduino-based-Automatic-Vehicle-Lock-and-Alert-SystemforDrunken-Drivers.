@@ -1,0 +1,103 @@
+#include <LiquidCrystal.h>
+#include <SoftwareSerial.h>
+
+// --- PIN CONFIGURATION ---
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+SoftwareSerial gsmSerial(A1, A2); // GSM RX, TX
+SoftwareSerial gpsSerial(A3, A4); // GPS RX, TX
+
+const int potPin = A0;    // Potentiometer replaces LogicToggle
+const int greenLed = 6;
+const int yellowLed = 13; 
+const int redLed = 7;
+const int buzzer = 8;
+const int relayPin = 10;
+
+bool smsSent = false;
+
+void setup() {
+  pinMode(greenLed, OUTPUT);
+  pinMode(yellowLed, OUTPUT);
+  pinMode(redLed, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+  pinMode(relayPin, OUTPUT);
+
+  Serial.begin(9600);    // For Virtual Terminal
+  gsmSerial.begin(9600); 
+  gpsSerial.begin(9600); 
+
+  lcd.begin(16, 2);
+  lcd.print("  BAC MONITOR  ");
+  lcd.setCursor(0, 1);
+  lcd.print(" SYSTEM ACTIVE ");
+  delay(2000);
+  lcd.clear();
+}
+
+void loop() {
+  // Read the Potentiometer (0 to 1023)
+  int rawValue = analogRead(potPin);      
+  // Convert raw value to Voltage (0.0 to 5.0)
+  float voltage = rawValue * (5.0 / 1023.0); 
+
+  // Display Current Voltage for debugging
+  lcd.setCursor(0, 0);
+  lcd.print("V: "); lcd.print(voltage); lcd.print("V ");
+
+  // --- LOGIC TABLE IMPLEMENTATION ---
+
+  // 1. INTOXICATED (0.00V - 1.18V)
+  if (voltage >= 0.00 && voltage <= 1.18) {
+    updateSystem(HIGH, LOW, LOW, LOW, HIGH, "INTOXICATED");
+    smsSent = false; 
+  } 
+  // 2. SLIGHTLY DRUNK (1.23V - 2.35V)
+  else if (voltage >= 1.23 && voltage <= 2.35) {
+    updateSystem(LOW, HIGH, LOW, LOW, HIGH, "SLIGHTLY DRUNK");
+    smsSent = false; 
+  } 
+  // 3. UNCONSCIOUS (2.38V - 5.00V)
+  else if (voltage >= 2.38) {
+    updateSystem(LOW, LOW, HIGH, HIGH, LOW, "UNCONSCIOUS!!");
+    
+    // Only send SMS if in this critical state and not sent yet
+    if (!smsSent) {
+      sendAlertSMS(voltage);
+      smsSent = true;
+    }
+  }
+
+  delay(200); 
+}
+
+// Function to update LEDs, Buzzer, Relay, and LCD text
+void updateSystem(int g, int y, int r, int bz, int rl, String statusMsg) {
+  digitalWrite(greenLed, g);
+  digitalWrite(yellowLed, y);
+  digitalWrite(redLed, r);
+  digitalWrite(buzzer, bz);
+  digitalWrite(relayPin, rl); // HIGH enables motor, LOW disables it
+
+  lcd.setCursor(0, 1);
+  lcd.print(statusMsg);
+  lcd.print("        "); // Extra spaces to clear old text
+}
+
+void sendAlertSMS(float val) {
+  Serial.println(">>> CRITICAL BAC: Sending SMS...");
+  gsmSerial.listen();
+  
+  gsmSerial.println("AT+CMGF=1");
+  delay(500);
+  gsmSerial.println("AT+CMGS=\"+1234567890\""); 
+  delay(500);
+  
+  gsmSerial.print("ALERT! Driver is UNCONSCIOUS. BAC: ");
+  gsmSerial.print(val);
+  gsmSerial.print("V. Location: 7.3484, 3.9299");
+  
+  delay(100);
+  gsmSerial.write(26); // Send CTRL+Z
+  delay(1000);
+  Serial.println(">>> SMS Sent Successfully.");
+}
